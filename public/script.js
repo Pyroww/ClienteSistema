@@ -628,7 +628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <td><button class="btn btn-danger btn-sm" data-index="${index}">X</button></td>
                 `;
                 corpoTabela.appendChild(tr);
-                total += produto.preco;
+                total += parseFloat(produto.preco);
             });
             document.querySelector('#total-venda').textContent = `Total: R$ ${total.toFixed(2)}`;
             atualizarParcelas();
