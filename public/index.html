@@ -7,6 +7,7 @@
     <title>Dashboard - Sistema de Vendas</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <aside class="sidebar">
@@ -16,7 +17,6 @@
             <a href="vendas.html"><i class="fas fa-shopping-cart icon"></i> Realizar Venda</a>
             <a href="clientes.html"><i class="fas fa-users icon"></i> Clientes</a>
             <a href="produtos.html"><i class="fas fa-box icon"></i> Produtos</a>
-
             <a href="#" id="logout-btn" style="margin-top: auto;"><i class="fas fa-sign-out-alt icon"></i> Sair</a>
         </nav>
     </aside>
@@ -31,9 +31,25 @@
             <p>Bem-vindo ao seu sistema de gestão de vendas.</p>
         </header>
         
-        <div class="card">
-            <h3>Visão Geral</h3>
-            <p>Utilize o menu à esquerda para navegar entre as seções do sistema.</p>
+        <div class="dashboard-grid">
+            <div class="card">
+    <h3>Previsão de Ganhos por Mês</h3>
+    
+    <div class="form-group">
+        <label for="seletorMes">Selecione o Mês:</label>
+        <select id="seletorMes" class="form-control"></select>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="previsaoMensalChart"></canvas>
+    </div>
+</div>
+            <div class="card">
+                <h3>Clientes com Parcelas em Atraso</h3>
+                <div id="listaClientesAtrasados">
+                    <p>Carregando...</p>
+                </div>
+            </div>
         </div>
 
     </main>

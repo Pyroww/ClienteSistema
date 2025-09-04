@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
     // URL base da sua nova API. Mude se o endereço do seu backend for diferente.
     const API_URL = '/api';
+    //const API_URL = 'http://localhost:3000/api';
 
     // Pega o nome do arquivo atual, ex: "clientes.html"
     const paginaAtual = window.location.pathname.split('/').pop() || 'index.html';
@@ -51,6 +52,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    
     // ===============================================
     // PÁGINA DE CLIENTES (clientes.html)
     // ===============================================
@@ -501,6 +503,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // PÁGINA DE VENDAS (vendas.html)
     // ===============================================
     if (paginaAtual === 'vendas.html') {
+        document.getElementById('data-venda').valueAsDate = new Date();
         let clienteSelecionadoVenda = null;
         let carrinho = [];
         let produtosDisponiveis = []; // Cache dos produtos para não buscar toda hora
@@ -570,7 +573,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 total: carrinho.reduce((acc, p) => acc + p.preco, 0),
                 pagamento: formaPagamentoSelect.value,
                 parcelas: parseInt(numeroParcelasInput.value) || 1,
-                assinatura: signaturePad.toDataURL("image/png")
+                assinatura: signaturePad.toDataURL("image/png"),
+                dataVenda: document.getElementById('data-venda').value // <-- NOVA LINHA
             };
 
             try {
@@ -671,4 +675,130 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         carregarProdutosVenda(); // Carga inicial
     }
+
+    // ===============================================
+// CÓDIGO PARA A PÁGINA DE DASHBOARD (index.html) - VERSÃO DINÂMICA
+// ===============================================
+if (paginaAtual === 'index.html' || paginaAtual === '') {
+    
+    const seletorMes = document.getElementById('seletorMes');
+    const chartCanvas = document.getElementById('previsaoMensalChart');
+    let myChart = null; // Variável para guardar a instância do gráfico
+
+    // Função para buscar e desenhar o gráfico para um mês/ano específico
+    const renderizarGraficoPrevisao = async (mes, ano) => {
+        try {
+            const response = await fetch(`${API_URL}/dashboard/previsao-mensal?mes=${mes}&ano=${ano}`);
+            if (!response.ok) throw new Error('Falha ao buscar dados da previsão.');
+            
+            const data = await response.json();
+            const totalReceber = parseFloat(data.total);
+
+            // ADICIONE ESTA LINHA PARA O TESTE:
+            console.log('O tipo da variável totalReceber é:', typeof totalReceber);
+
+            const ctx = chartCanvas.getContext('2d');
+            
+            // Se já existe um gráfico, destrua-o antes de desenhar o novo
+            if (myChart) {
+                myChart.destroy();
+            }
+            
+            myChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Valor a Receber'],
+                    datasets: [{
+                        label: `Total: R$ ${totalReceber.toFixed(2)}`,
+                        data: [totalReceber],
+                        backgroundColor: ['rgba(75, 192, 192, 0.6)'],
+                        borderColor: ['rgba(75, 192, 192, 1)'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: { y: { beginAtZero: true } },
+                    plugins: { legend: { display: true, position: 'top' } },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+
+        } catch (error) {
+            console.error("Erro no gráfico de previsão:", error);
+            chartCanvas.parentElement.innerHTML = '<p>Não foi possível carregar o gráfico.</p>';
+        }
+    };
+
+    // Função para buscar os meses disponíveis e popular o seletor
+    const popularSeletorDeMeses = async () => {
+        try {
+            const response = await fetch(`${API_URL}/dashboard/meses-disponiveis`);
+            if (!response.ok) throw new Error('Falha ao buscar meses.');
+
+            const meses = await response.json();
+
+            if (meses.length === 0) {
+                seletorMes.innerHTML = '<option>Nenhuma parcela futura</option>';
+                return;
+            }
+
+            const formatador = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+            meses.forEach(item => {
+                const data = new Date(item.mes);
+                const mes = data.getUTCMonth() + 1;
+                const ano = data.getUTCFullYear();
+                
+                const option = document.createElement('option');
+                option.value = `${mes}-${ano}`;
+                option.textContent = formatador.format(data).replace(/^\w/, c => c.toUpperCase());
+                seletorMes.appendChild(option);
+            });
+
+            // Dispara o render do gráfico para o primeiro mês da lista
+            const [primeiroMes, primeiroAno] = seletorMes.value.split('-');
+            renderizarGraficoPrevisao(primeiroMes, primeiroAno);
+
+        } catch (error) {
+            console.error("Erro ao popular meses:", error);
+            seletorMes.innerHTML = '<option>Erro ao carregar</option>';
+        }
+    };
+
+    // Adiciona o evento que atualiza o gráfico quando o usuário muda o mês
+    seletorMes.addEventListener('change', (e) => {
+        const [mes, ano] = e.target.value.split('-');
+        renderizarGraficoPrevisao(mes, ano);
+    });
+
+    // Função para renderizar a lista de clientes (continua igual)
+    const renderizarClientesAtrasados = async () => {
+        const container = document.getElementById('listaClientesAtrasados');
+        try {
+            const response = await fetch(`${API_URL}/dashboard/clientes-atrasados`);
+            if (!response.ok) throw new Error('Falha ao buscar clientes em atraso.');
+            const clientes = await response.json();
+            if (clientes.length === 0) {
+                container.innerHTML = '<p>Nenhum cliente com parcelas em atraso. Bom trabalho!</p>';
+                return;
+            }
+            let html = '<ul>';
+            clientes.forEach(cliente => {
+                html += `<li><strong>${cliente.nome}</strong> - Contato: ${cliente.telefones.join(' / ')}</li>`;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
+        } catch (error) {
+            console.error("Erro na lista de clientes:", error);
+            container.innerHTML = '<p>Não foi possível carregar a lista de clientes.</p>';
+        }
+    };
+    
+    // Inicia o carregamento do dashboard
+    popularSeletorDeMeses();
+    renderizarClientesAtrasados();
+}
+
 });
+

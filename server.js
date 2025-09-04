@@ -135,46 +135,44 @@ app.delete('/api/produtos/:id', async (req, res) => {
 
 // == VENDAS ==
 app.post('/api/vendas', async (req, res) => {
-    const { cliente, produtos, total, pagamento, parcelas, assinatura } = req.body;
+    // 1. Recebemos o novo campo 'dataVenda' do corpo da requisição
+    const { cliente, produtos, total, pagamento, parcelas, assinatura, dataVenda } = req.body;
     
-    // Inicia uma transação com o banco. Ou tudo funciona, ou nada é salvo.
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // 1. Insere a venda na tabela 'vendas'
-        const vendaQuery = 'INSERT INTO vendas (cliente_id, total, pagamento, parcelas, assinatura) VALUES ($1, $2, $3, $4, $5) RETURNING id, data_hora';
-        const vendaResult = await client.query(vendaQuery, [cliente.id, total, pagamento, parcelas, assinatura]);
-        const vendaId = vendaResult.rows[0].id;
-        const dataVenda = new Date(vendaResult.rows[0].data_hora);
+        // Usamos a data fornecida ou a data atual se nenhuma for passada
+        const dataBaseParaCalculo = dataVenda ? new Date(dataVenda) : new Date();
 
-        // 2. Insere os produtos na tabela de junção 'vendas_produtos' e atualiza o estoque
+        // 2. Inserimos a venda, mas agora usando a data correta
+        const vendaQuery = 'INSERT INTO vendas (cliente_id, total, pagamento, parcelas, assinatura, data_hora) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id';
+        const vendaResult = await client.query(vendaQuery, [cliente.id, total, pagamento, parcelas, assinatura, dataBaseParaCalculo]);
+        const vendaId = vendaResult.rows[0].id;
+        
         for (const produto of produtos) {
             await client.query('INSERT INTO vendas_produtos (venda_id, produto_id, quantidade, preco_unitario) VALUES ($1, $2, 1, $3)', [vendaId, produto.id, produto.preco]);
             await client.query('UPDATE produtos SET estoque = estoque - 1 WHERE id = $1', [produto.id]);
         }
-
-        // 3. Se for crediário, insere as parcelas
+        
         if (pagamento === 'crediario' && parcelas > 0) {
             const valorParcela = total / parcelas;
             for (let i = 1; i <= parcelas; i++) {
-                const dataVencimento = new Date(dataVenda);
-                dataVencimento.setMonth(dataVenda.getMonth() + i);
+                // 3. A data de vencimento é calculada a partir da data da venda (e não da data atual)
+                const dataVencimento = new Date(dataBaseParaCalculo);
+                dataVencimento.setMonth(dataBaseParaCalculo.getMonth() + i);
                 await client.query('INSERT INTO parcelas_crediario (venda_id, valor, data_vencimento) VALUES ($1, $2, $3)', [vendaId, valorParcela, dataVencimento]);
             }
         }
         
-        // Se tudo deu certo, confirma a transação
         await client.query('COMMIT');
         res.status(201).json({ message: 'Venda finalizada com sucesso!', vendaId: vendaId });
 
     } catch (err) {
-        // Se algo deu errado, desfaz tudo
         await client.query('ROLLBACK');
         console.error(err);
         res.status(500).json({ error: 'Erro ao finalizar venda.' });
     } finally {
-        // Libera a conexão com o banco
         client.release();
     }
 });
@@ -242,6 +240,67 @@ app.patch('/api/parcelas/:id/pagar', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Erro ao dar baixa na parcela.' });
+    }
+});
+
+// ROTA #1: Retorna uma lista de meses que têm parcelas pendentes
+app.get('/api/dashboard/meses-disponiveis', async (req, res) => {
+    try {
+        const query = `
+            SELECT DISTINCT date_trunc('month', data_vencimento) AS mes
+            FROM parcelas_crediario
+            WHERE status = 'pendente'
+            ORDER BY mes ASC;
+        `;
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao buscar meses disponíveis.' });
+    }
+});
+
+// ROTA #2: Retorna o total a receber para um mês e ano específicos
+app.get('/api/dashboard/previsao-mensal', async (req, res) => {
+    const { mes, ano } = req.query; // Recebe mês e ano como parâmetros. Ex: /?mes=9&ano=2025
+
+    if (!mes || !ano) {
+        return res.status(400).json({ error: 'Mês e ano são obrigatórios.' });
+    }
+
+    try {
+        const query = `
+            SELECT SUM(valor) as total
+            FROM parcelas_crediario
+            WHERE status = 'pendente' 
+            AND EXTRACT(MONTH FROM data_vencimento) = $1
+            AND EXTRACT(YEAR FROM data_vencimento) = $2;
+        `;
+        const { rows } = await pool.query(query, [mes, ano]);
+        const totalReceber = rows[0].total || 0;
+        res.json({ total: totalReceber });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao buscar previsão mensal.' });
+    }
+});
+
+// ROTA PARA DADOS DO DASHBOARD: CLIENTES COM PARCELAS ATRASADAS
+app.get('/api/dashboard/clientes-atrasados', async (req, res) => {
+    try {
+        const query = `
+            SELECT DISTINCT c.id, c.nome, c.telefones
+            FROM clientes c
+            JOIN vendas v ON c.id = v.cliente_id
+            JOIN parcelas_crediario p ON v.id = p.venda_id
+            WHERE p.status = 'pendente'
+            AND p.data_vencimento < CURRENT_DATE;
+        `;
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao buscar clientes com parcelas atrasadas.' });
     }
 });
 
