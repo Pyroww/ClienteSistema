@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
     // URL base da sua nova API. Mude se o endereço do seu backend for diferente.
-    //const API_URL = '/api';
-    const API_URL = 'http://localhost:3000/api';
+    const API_URL = '/api';
+    //const API_URL = 'http://localhost:3000/api';
 
     // Pega o nome do arquivo atual, ex: "clientes.html"
     const paginaAtual = window.location.pathname.split('/').pop() || 'index.html';
