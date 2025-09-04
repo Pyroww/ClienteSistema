@@ -34,7 +34,7 @@ app.get('/api/clientes', async (req, res) => {
     console.log(JSON.stringify(req.body, null, 2));
     console.log("========================================");
     // ---------------------------------------------------
-
+    
     const { q } = req.query; // q = query de busca
     try {
         let query = 'SELECT * FROM clientes ORDER BY nome ASC';
@@ -78,15 +78,43 @@ app.put('/api/clientes/:id', async (req, res) => {
     }
 });
 
-// Apagar cliente
 app.delete('/api/clientes/:id', async (req, res) => {
     const { id } = req.params;
+    const client = await pool.connect();
     try {
-        await pool.query('DELETE FROM clientes WHERE id = $1', [id]);
-        res.status(204).send(); // 204 No Content = sucesso sem corpo de resposta
+        await client.query('BEGIN');
+
+        // 1. Encontrar todas as vendas do cliente
+        const vendasQuery = 'SELECT id FROM vendas WHERE cliente_id = $1';
+        const { rows: vendasDoCliente } = await client.query(vendasQuery, [id]);
+
+        // 2. Para cada venda, fazer o processo completo de exclusão
+        for (const venda of vendasDoCliente) {
+            // Devolver produtos ao estoque
+            const produtosVendidosQuery = 'SELECT produto_id, quantidade FROM vendas_produtos WHERE venda_id = $1';
+            const { rows: produtosVendidos } = await client.query(produtosVendidosQuery, [venda.id]);
+            for (const produto of produtosVendidos) {
+                await client.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [produto.quantidade, produto.produto_id]);
+            }
+            // Apagar parcelas, registros de venda e a venda principal (usando o CASCADE do banco de dados)
+            await client.query('DELETE FROM vendas WHERE id = $1', [venda.id]);
+        }
+
+        // 3. Apagar as observações do cliente
+        await client.query('DELETE FROM observacoes WHERE cliente_id = $1', [id]);
+
+        // 4. Finalmente, apagar o cliente, agora que seu histórico está limpo
+        await client.query('DELETE FROM clientes WHERE id = $1', [id]);
+
+        await client.query('COMMIT');
+        res.status(204).send(); // Sucesso
+        
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Erro ao apagar cliente.' });
+        await client.query('ROLLBACK');
+        console.error('Erro ao apagar cliente:', err);
+        res.status(500).json({ error: 'Erro ao apagar cliente e seu histórico.' });
+    } finally {
+        client.release();
     }
 });
 
@@ -130,44 +158,19 @@ app.put('/api/produtos/:id', async (req, res) => {
 });
 
 // Apagar produto
-app.delete('/api/clientes/:id', async (req, res) => {
+app.delete('/api/produtos/:id', async (req, res) => {
     const { id } = req.params;
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-
-        // 1. Encontrar todas as vendas do cliente
-        const vendasQuery = 'SELECT id FROM vendas WHERE cliente_id = $1';
-        const { rows: vendasDoCliente } = await client.query(vendasQuery, [id]);
-
-        // 2. Para cada venda, fazer o processo completo de exclusão
-        for (const venda of vendasDoCliente) {
-            // Devolver produtos ao estoque
-            const produtosVendidosQuery = 'SELECT produto_id, quantidade FROM vendas_produtos WHERE venda_id = $1';
-            const { rows: produtosVendidos } = await client.query(produtosVendidosQuery, [venda.id]);
-            for (const produto of produtosVendidos) {
-                await client.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [produto.quantidade, produto.produto_id]);
-            }
-            // Apagar parcelas, registros de venda e a venda principal (usando o CASCADE do banco de dados)
-            await client.query('DELETE FROM vendas WHERE id = $1', [venda.id]);
-        }
-
-        // 3. Finalmente, apagar o cliente, agora que seu histórico está limpo
-        await client.query('DELETE FROM clientes WHERE id = $1', [id]);
-
-        await client.query('COMMIT');
-        res.status(204).send(); // Sucesso
-        
+        await pool.query('DELETE FROM produtos WHERE id = $1', [id]);
+        res.status(204).send();
     } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Erro ao apagar cliente:', err);
-        res.status(500).json({ error: 'Erro ao apagar cliente e seu histórico.' });
-    } finally {
-        client.release();
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao apagar produto.' });
     }
 });
 
 // == VENDAS ==
+// ROTA DE VENDAS FINAL E CORRIGIDA
 app.post('/api/vendas', async (req, res) => {
     // Agora pegamos apenas os dados essenciais. O 'total' será recalculado no backend.
     const { cliente, produtos, pagamento, parcelas, assinatura, dataVenda } = req.body;
@@ -196,7 +199,20 @@ app.post('/api/vendas', async (req, res) => {
         }, 0);
         // --- FIM DA LÓGICA DE AGRUPAMENTO ---
 
-        const dataBaseParaCalculo = dataVenda ? new Date(dataVenda) : new Date();
+        let dataBaseParaCalculo;
+const agora = new Date(); // Pega o momento exato atual (com hora, minuto, segundo)
+
+if (dataVenda) {
+    // Pega apenas a parte da HORA do momento atual. Ex: "17:06:53"
+    const horaAtual = agora.toTimeString().split(' ')[0];
+
+    // Junta a DATA selecionada no calendário com a HORA exata de agora
+    // Ex: "2025-09-04" + "T" + "17:06:53" -> "2025-09-04T17:06:53"
+    dataBaseParaCalculo = new Date(`${dataVenda}T${horaAtual}`);
+} else {
+    // Se nenhuma data foi escolhida, simplesmente usa o momento exato atual
+    dataBaseParaCalculo = agora;
+}
 
         const vendaQuery = 'INSERT INTO vendas (cliente_id, total, pagamento, parcelas, assinatura, data_hora) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id';
         const vendaResult = await client.query(vendaQuery, [cliente.id, totalCalculado, pagamento, parcelas, assinatura, dataBaseParaCalculo]);
@@ -348,13 +364,13 @@ app.get('/api/dashboard/previsao-mensal', async (req, res) => {
 app.get('/api/dashboard/clientes-atrasados', async (req, res) => {
     try {
         const query = `
-            SELECT DISTINCT c.id, c.nome, c.telefones
-            FROM clientes c
-            JOIN vendas v ON c.id = v.cliente_id
-            JOIN parcelas_crediario p ON v.id = p.venda_id
-            WHERE p.status = 'pendente'
-            AND p.data_vencimento < CURRENT_DATE;
-        `;
+    SELECT DISTINCT c.id, c.nome, c.telefones
+    FROM clientes c
+    JOIN vendas v ON c.id = v.cliente_id
+    JOIN parcelas_crediario p ON v.id = p.venda_id
+    WHERE p.status = 'pendente'
+    AND p.data_vencimento < date_trunc('day', NOW());
+`;
         const { rows } = await pool.query(query);
         res.json(rows);
     } catch (err) {
