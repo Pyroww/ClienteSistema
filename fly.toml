@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for sitefinal on 2025-09-03T03:01:35-03:00
+# fly.toml app configuration file generated for clientevendas on 2025-09-04T01:25:24-03:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'sitefinal'
+app = 'clientevendas'
 primary_region = 'gru'
 
 [build]
