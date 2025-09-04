@@ -570,7 +570,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const vendaData = {
                 cliente: clienteSelecionadoVenda,
                 produtos: carrinho,
-                total: carrinho.reduce((acc, p) => acc + p.preco, 0),
+                total: carrinho.reduce((acc, p) => acc + parseFloat(p.preco), 0),
                 pagamento: formaPagamentoSelect.value,
                 parcelas: parseInt(numeroParcelasInput.value) || 1,
                 assinatura: signaturePad.toDataURL("image/png"),
