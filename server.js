@@ -27,6 +27,14 @@ const pool = new Pool({
 // == CLIENTES ==
 // Listar todos os clientes (com busca)
 app.get('/api/clientes', async (req, res) => {
+
+    // --- ADICIONE ESTAS LINHAS DE DEPURAÇÃO AQUI ---
+    console.log("========================================");
+    console.log(">>>> DADOS RECEBIDOS DO FRONTEND (CARRINHO):");
+    console.log(JSON.stringify(req.body, null, 2));
+    console.log("========================================");
+    // ---------------------------------------------------
+
     const { q } = req.query; // q = query de busca
     try {
         let query = 'SELECT * FROM clientes ORDER BY nome ASC';
@@ -122,43 +130,93 @@ app.put('/api/produtos/:id', async (req, res) => {
 });
 
 // Apagar produto
-app.delete('/api/produtos/:id', async (req, res) => {
+app.delete('/api/clientes/:id', async (req, res) => {
     const { id } = req.params;
+    const client = await pool.connect();
     try {
-        await pool.query('DELETE FROM produtos WHERE id = $1', [id]);
-        res.status(204).send();
+        await client.query('BEGIN');
+
+        // 1. Encontrar todas as vendas do cliente
+        const vendasQuery = 'SELECT id FROM vendas WHERE cliente_id = $1';
+        const { rows: vendasDoCliente } = await client.query(vendasQuery, [id]);
+
+        // 2. Para cada venda, fazer o processo completo de exclusão
+        for (const venda of vendasDoCliente) {
+            // Devolver produtos ao estoque
+            const produtosVendidosQuery = 'SELECT produto_id, quantidade FROM vendas_produtos WHERE venda_id = $1';
+            const { rows: produtosVendidos } = await client.query(produtosVendidosQuery, [venda.id]);
+            for (const produto of produtosVendidos) {
+                await client.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [produto.quantidade, produto.produto_id]);
+            }
+            // Apagar parcelas, registros de venda e a venda principal (usando o CASCADE do banco de dados)
+            await client.query('DELETE FROM vendas WHERE id = $1', [venda.id]);
+        }
+
+        // 3. Finalmente, apagar o cliente, agora que seu histórico está limpo
+        await client.query('DELETE FROM clientes WHERE id = $1', [id]);
+
+        await client.query('COMMIT');
+        res.status(204).send(); // Sucesso
+        
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Erro ao apagar produto.' });
+        await client.query('ROLLBACK');
+        console.error('Erro ao apagar cliente:', err);
+        res.status(500).json({ error: 'Erro ao apagar cliente e seu histórico.' });
+    } finally {
+        client.release();
     }
 });
 
 // == VENDAS ==
 app.post('/api/vendas', async (req, res) => {
-    // 1. Recebemos o novo campo 'dataVenda' do corpo da requisição
-    const { cliente, produtos, total, pagamento, parcelas, assinatura, dataVenda } = req.body;
+    // Agora pegamos apenas os dados essenciais. O 'total' será recalculado no backend.
+    const { cliente, produtos, pagamento, parcelas, assinatura, dataVenda } = req.body;
     
+    // Verificação de segurança básica
+    if (!cliente || !produtos || !produtos.length) {
+        return res.status(400).json({ error: "Dados da venda incompletos." });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // Usamos a data fornecida ou a data atual se nenhuma for passada
+        // --- LÓGICA DE AGRUPAMENTO E CÁLCULO DO TOTAL (CORRIGIDA) ---
+        const produtosAgrupados = produtos.reduce((acc, produto) => {
+            if (!acc[produto.id]) {
+                acc[produto.id] = { ...produto, quantidade: 0 };
+            }
+            acc[produto.id].quantidade += 1;
+            return acc;
+        }, {});
+        
+        // Recalculamos o total no backend para garantir a integridade
+        const totalCalculado = Object.values(produtosAgrupados).reduce((acc, produto) => {
+            return acc + (parseFloat(produto.preco) * produto.quantidade);
+        }, 0);
+        // --- FIM DA LÓGICA DE AGRUPAMENTO ---
+
         const dataBaseParaCalculo = dataVenda ? new Date(dataVenda) : new Date();
 
-        // 2. Inserimos a venda, mas agora usando a data correta
         const vendaQuery = 'INSERT INTO vendas (cliente_id, total, pagamento, parcelas, assinatura, data_hora) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id';
-        const vendaResult = await client.query(vendaQuery, [cliente.id, total, pagamento, parcelas, assinatura, dataBaseParaCalculo]);
+        const vendaResult = await client.query(vendaQuery, [cliente.id, totalCalculado, pagamento, parcelas, assinatura, dataBaseParaCalculo]);
         const vendaId = vendaResult.rows[0].id;
-        
-        for (const produto of produtos) {
-            await client.query('INSERT INTO vendas_produtos (venda_id, produto_id, quantidade, preco_unitario) VALUES ($1, $2, 1, $3)', [vendaId, produto.id, produto.preco]);
-            await client.query('UPDATE produtos SET estoque = estoque - 1 WHERE id = $1', [produto.id]);
+
+        for (const produtoId in produtosAgrupados) {
+            const produto = produtosAgrupados[produtoId];
+            await client.query(
+                'INSERT INTO vendas_produtos (venda_id, produto_id, quantidade, preco_unitario) VALUES ($1, $2, $3, $4)',
+                [vendaId, produto.id, produto.quantidade, produto.preco]
+            );
+            await client.query(
+                'UPDATE produtos SET estoque = estoque - $1 WHERE id = $2',
+                [produto.quantidade, produto.id]
+            );
         }
         
         if (pagamento === 'crediario' && parcelas > 0) {
-            const valorParcela = total / parcelas;
+            const valorParcela = totalCalculado / parcelas;
             for (let i = 1; i <= parcelas; i++) {
-                // 3. A data de vencimento é calculada a partir da data da venda (e não da data atual)
                 const dataVencimento = new Date(dataBaseParaCalculo);
                 dataVencimento.setMonth(dataBaseParaCalculo.getMonth() + i);
                 await client.query('INSERT INTO parcelas_crediario (venda_id, valor, data_vencimento) VALUES ($1, $2, $3)', [vendaId, valorParcela, dataVencimento]);
@@ -170,8 +228,9 @@ app.post('/api/vendas', async (req, res) => {
 
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error(err);
-        res.status(500).json({ error: 'Erro ao finalizar venda.' });
+        // Enviamos o erro original do banco de dados no console para depuração
+        console.error('ERRO DETALHADO AO FINALIZAR VENDA:', err);
+        res.status(500).json({ error: 'Erro interno ao finalizar a venda.' });
     } finally {
         client.release();
     }
