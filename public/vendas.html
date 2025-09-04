@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <script src="auth.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realizar Venda</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <h1>AR Cosmeticos</h1>
+        <nav>
+            <a href="index.html"><i class="fas fa-home icon"></i> Dashboard</a>
+            <a href="vendas.html"><i class="fas fa-shopping-cart icon"></i> Realizar Venda</a>
+            <a href="clientes.html" class="active"><i class="fas fa-users icon"></i> Clientes</a>
+            <a href="produtos.html"><i class="fas fa-box icon"></i> Produtos</a>        
+        
+            <a href="#" id="logout-btn" style="margin-top: auto;"><i class="fas fa-sign-out-alt icon"></i> Sair</a>
+        </nav>
+        
+    </aside>
+
+    <main class="main-content">
+
+        <button id="menu-toggle" class="menu-toggle-btn"><i class="fas fa-bars"></i></button>
+        <div id="menu-overlay"></div>
+        
+        <header class="page-header">
+            <h2>Realizar Nova Venda</h2>
+        </header>
+
+        <div class="card">
+            <h3>Passo 1: Selecionar Cliente</h3>
+            <div class="form-group">
+                <label for="busca-cliente">Pesquisar cliente por nome ou CPF</label>
+                <input type="text" id="busca-cliente">
+            </div>
+            <div id="resultado-busca-cliente"></div>
+            <div id="cliente-selecionado-info">Nenhum cliente selecionado.</div>
+        </div>
+
+        <div class="card">
+            <h3>Passo 2: Adicionar Produtos ao Carrinho</h3>
+            <div class="form-group">
+                <label for="select-produto">Escolha um produto</label>
+                <select id="select-produto">
+                    <option value="">Selecione...</option>
+                </select>
+            </div>
+            <button id="btn-add-produto" class="btn">Adicionar Produto</button>
+
+            <h4 style="margin-top: 25px;">Carrinho</h4>
+            <table id="carrinho-venda">
+                <thead>
+                    <tr><th>Produto</th><th>Preço</th><th>Ações</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div id="total-venda">Total: R$ 0.00</div>
+        </div>
+        
+        <div class="card">
+            <h3>Passo 3: Pagamento</h3>
+             <div class="form-grid">
+                <div class="form-group">
+                    <label for="forma-pagamento">Forma de Pagamento</label>
+                    <select id="forma-pagamento">
+                        <option value="avista">À Vista (Dinheiro/Débito)</option>
+                        <option value="credito">Cartão de Crédito</option>
+                        <option value="crediario">Crediário</option>
+                    </select>
+                </div>
+                <div class="form-group" id="opcoes-parcelamento" style="display: none;">
+                    <label for="numero-parcelas">Nº de Parcelas</label>
+                    <input type="number" id="numero-parcelas" min="1" value="1">
+                    <div id="valor-parcela" style="margin-top: 10px; font-weight: bold;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Passo 4: Assinatura do Cliente</h3>
+            <div id="signature-pad-wrapper">
+                <canvas id="signature-pad-canvas"></canvas>
+            </div>
+            <button id="clear-signature" class="btn btn-secondary btn-sm" type="button" style="margin-top: 10px;">Limpar Assinatura</button>
+        </div>
+
+        <button id="btn-finalizar-venda" class="btn" style="width: 100%; padding: 15px; font-size: 1.2em; background-color: var(--success-color);">Finalizar Venda</button>
+
+    </main>
+    <script src="script.js"></script>
+</body>
+</html>
