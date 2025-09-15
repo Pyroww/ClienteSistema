@@ -529,7 +529,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (produto.estoque > 0) {
                         const option = document.createElement('option');
                         option.value = produto.id;
-                        option.textContent = `${produto.nome} - R$ ${Number(produto.preco).toFixed(2)} (${produto.estoque} em estoque)`;
+                        option.textContent = `${produto.nome} - ${produto.marca} - R$ ${Number(produto.preco).toFixed(2)} (${produto.estoque} em estoque)`;
                         selectProduto.appendChild(option);
                     }
                 });
